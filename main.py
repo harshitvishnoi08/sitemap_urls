@@ -78,4 +78,3 @@ async def process_sitemaps(payload: List[SitemapURL]):
     return {
         "output": output
         }
-    }
