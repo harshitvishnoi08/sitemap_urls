@@ -5,70 +5,81 @@ import xmltodict
 from typing import List
 from urllib.parse import urlparse
 import asyncio
-from datetime import datetime, timedelta
 
 app = FastAPI()
 
 class SitemapURL(BaseModel):
     url: str
 
-# Helper to compute current week's Monday
-def get_current_week():
-    today = datetime.utcnow()
-    monday = today - timedelta(days=today.weekday())
-    return monday.strftime('%Y-%m-%d')
-
 @app.post("/process-sitemaps")
 async def process_sitemaps(payload: List[SitemapURL]):
     print("Received payload:", payload)
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        tasks = [client.get(entry.url) for entry in payload]
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; SitemapFetcher/1.0; +https://yourdomain.com)"
+    }
 
-    post_counts = {}
-    current_week = get_current_week()
+    sem = asyncio.Semaphore(5)  # Limit concurrency
 
-    for sitemap_url, response in zip(payload, responses):
-        print(f"\n🔍 Processing: {sitemap_url.url}")
-        if isinstance(response, Exception):
-            print("❌ Error fetching:", response)
+    async def fetch(url):
+        async with sem:
+            try:
+                async with httpx.AsyncClient(timeout=20.0, headers=headers) as client:
+                    print(f"\n🔍 Processing: {url}")
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    return url, response
+            except Exception as e:
+                print(f"❌ Error fetching {url}:", e)
+                return url, None
+
+    tasks = [fetch(entry.url) for entry in payload]
+    results = await asyncio.gather(*tasks)
+
+    output = []
+
+    for url, response in results:
+        if response is None:
             continue
-
         try:
             parsed = xmltodict.parse(response.text)
-            print("✅ Parsed XML root keys:", parsed.keys())
 
             if "urlset" in parsed:
                 urls = parsed["urlset"].get("url", [])
                 if not isinstance(urls, list):
                     urls = [urls]
-
-                count = 0
-                domain = urlparse(sitemap_url.url).netloc
-
                 for entry in urls:
                     loc = entry.get("loc")
-                    if loc:
-                        count += 1
+                    lastmod = entry.get("lastmod")
+                    domain = urlparse(loc).netloc if loc else None
+                    output.append({
+                        "domain": domain,
+                        "url": loc,
+                        "lastmod": lastmod
+                    })
 
-                if domain not in post_counts:
-                    post_counts[domain] = 0
-                post_counts[domain] += count
+            elif "sitemapindex" in parsed:
+                sitemaps = parsed["sitemapindex"].get("sitemap", [])
+                if not isinstance(sitemaps, list):
+                    sitemaps = [sitemaps]
+                for sitemap in sitemaps:
+                    loc = sitemap.get("loc")
+                    lastmod = sitemap.get("lastmod")
+                    domain = urlparse(loc).netloc if loc else None
+                    output.append({
+                        "domain": domain,
+                        "blogSitemapUrl": loc,
+                        "lastmod": lastmod
+                    })
+
+            else:
+                print(f"⚠️ Unknown XML structure for {url}")
 
         except Exception as e:
-            print("❌ Error parsing XML:", e)
+            print(f"❌ Error parsing XML from {url}:", e)
             continue
-
-    # Prepare output format for n8n
-    output = []
-    for domain, count in post_counts.items():
-        output.append({
-            "domain": domain,
-            "count": count,
-            "week": current_week
-        })
 
     print("\n📤 Final Output:", output)
     return output
+
 
