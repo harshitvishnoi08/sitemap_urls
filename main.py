@@ -75,19 +75,7 @@ async def process_sitemaps(payload: List[SitemapURL]):
     successful_domains = set(post_counts.keys())
     failed_domains = all_domains_sent - successful_domains
 
-    print("\n📊 Summary Stats:")
-    print(f"📥 Domains sent: {len(all_domains_sent)}")
-    print(f"✅ Domains succeeded: {len(successful_domains)}")
-    print(f"❌ Domains failed: {len(failed_domains)}")
-    print(f"🧾 Failed domain details: {dict(domain_failures)}")
-
     return {
-        "output": output,
-        "summary": {
-            "total_domains_sent": len(all_domains_sent),
-            "total_domains_successful": len(successful_domains),
-            "total_domains_failed": len(failed_domains),
-            "failed_domains": list(failed_domains),
-            "failed_details": dict(domain_failures),
+        "output": output
         }
     }
