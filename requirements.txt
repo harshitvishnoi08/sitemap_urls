@@ -1,0 +1,6 @@
+fastapi
+pydantic
+httpx
+xmltodict
+typing 
+uvicorn
